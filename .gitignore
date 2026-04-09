@@ -1,11 +1,41 @@
+# Dependencies
 node_modules/
+
+# Next.js
 .next/
-.vercel/
-.env
-.env.local
-.env.production.local
-.env.vercel
-.env.vercel.production
-.env.vercel-check
+out/
+
+# Build
+dist/
 *.tsbuildinfo
 
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Vercel
+.vercel/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database files
+*.db
+*.db-journal
+
+# Claude / AI tools
+.claude/
+
+# Docker
+Dockerfile
+.dockerignore
+Caddyfile
+
+# Misc lock files
+bun.lock
