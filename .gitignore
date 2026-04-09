@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.vercel/
+.env
+.env.local
+.env.production.local
+.env.vercel
+.env.vercel.production
+.env.vercel-check
+*.tsbuildinfo
+

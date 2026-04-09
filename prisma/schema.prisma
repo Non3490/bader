@@ -1,0 +1,818 @@
+// Gabon COD Platform — Prisma Schema v3
+// Dev & Prod: PostgreSQL (Neon)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                    String             @id @default(cuid())
+  email                 String             @unique
+  password              String
+  name                  String
+  phone                 String?
+  role                  String             @default("SELLER")
+  isActive              Boolean            @default(true)
+  parentSellerId        String?
+  zoneId                String?
+  parentSeller          User?              @relation("SellerTeam", fields: [parentSellerId], references: [id])
+  zone                  Zone?              @relation("ZoneDeliveryMen", fields: [zoneId], references: [id])
+  subUsers              User[]             @relation("SellerTeam")
+  createdAt             DateTime           @default(now())
+  ordersAsSeller        Order[]            @relation("OrderSeller")
+  ordersAsDeliveryMan   Order[]            @relation("DeliveryMan")
+  invoicesAsDeliveryMan Invoice[]          @relation("DeliveryManInvoice")
+  assignedOrders        Order[]            @relation("AssignedAgent")
+  products              Product[]
+  stocks                Stock[]
+  stockMovements        StockMovement[]
+  expenses              Expense[]          @relation("ExpenseSeller")
+  agentExpenses         Expense[]          @relation("AgentExpense")
+  invoices              Invoice[]          @relation("SellerInvoice")
+  integrations          Integration[]
+  googleSheets          GoogleSheet[]
+  callLogs              CallLog[]
+  callRecordings        CallRecording[]
+  wallet                Wallet?
+  apiKey                ApiKey?
+  activityLogs          ActivityLog[]
+  sourcingRequests      SourcingRequest[]
+  catalogFavorites      CatalogFavorite[]
+  agentSession          AgentSession?
+  deliveryLocations     DeliveryLocation[]
+  deliveryFeeConfig     DeliveryFeeConfig?
+  tenantSettingsId      String?
+  tenantSettings        TenantSettings?    @relation(fields: [tenantSettingsId], references: [id])
+  appNotifications      Notification[]
+  deliveryZones         DeliveryZone[]     @relation("DeliveryZoneDriver")
+  remittanceLocks       RemittanceLock[]   @relation("RemittanceLockDriver")
+  phoneCallLogs         PhoneCallLog[]     @relation("PhoneCallAgent")
+  notificationSettings  NotificationSettings?
+}
+
+model AgentSession {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id])
+  lastSeen        DateTime @updatedAt
+  isOnline        Boolean  @default(false)
+  currentWorkload Int      @default(0)
+  createdAt       DateTime @default(now())
+}
+
+model Blacklist {
+  id          String    @id @default(cuid())
+  phone       String    @unique
+  reason      String?
+  autoFlagged Boolean   @default(true)
+  returnCount Int       @default(0)
+  createdAt   DateTime  @default(now())
+  removedAt   DateTime?
+  removedBy   String?
+  isActive    Boolean   @default(true)
+}
+
+model Customer {
+  id             String   @id @default(cuid())
+  phone          String   @unique
+  deliveryRate   Float    @default(0)
+  orderCount     Int      @default(0)
+  deliveredCount Int      @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+model Zone {
+  id          String  @id @default(cuid())
+  name        String
+  city        String
+  description String?
+  deliveryMen User[]  @relation("ZoneDeliveryMen")
+  orders      Order[]
+}
+
+model DeliveryZone {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  polygon   String // JSON: Array of {lat, lng} coordinates
+  driverId  String?
+  driver    User?    @relation("DeliveryZoneDriver", fields: [driverId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]  @relation("OrderDeliveryZone")
+
+  @@index([driverId])
+}
+
+model Order {
+  id                  String            @id @default(cuid())
+  trackingNumber      String            @unique
+  sellerId            String
+  seller              User              @relation("OrderSeller", fields: [sellerId], references: [id])
+  deliveryManId       String?
+  deliveryMan         User?             @relation("DeliveryMan", fields: [deliveryManId], references: [id])
+  zoneId              String?
+  zone                Zone?             @relation(fields: [zoneId], references: [id])
+  deliveryZoneId      String?
+  deliveryZone        DeliveryZone?     @relation("OrderDeliveryZone", fields: [deliveryZoneId], references: [id])
+  assignedAgentId     String?
+  assignedAgent       User?             @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+  assignedDriverId    String? // CORE 03: Assigned delivery driver (separate Driver model)
+  assignedDriver      Driver?           @relation("DriverOrderAssignment", fields: [assignedDriverId], references: [id])
+  lockedByAgentId     String? // soft lock: agent currently viewing
+  lockedAt            DateTime? // soft lock expires after 5 min
+  callAttempts        Int               @default(0)
+  priority            Int               @default(0) // higher = shown first
+  recipientName       String
+  phone               String
+  address             String
+  city                String
+  note                String?
+  codAmount           Float
+  status              String            @default("NEW") // NEW | CONFIRMED | SHIPPED | DELIVERED | RETURNED | CANCELLED | POSTPONED | NO_ANSWER | BUSY | CALLBACK | UNREACHED | WRONG_NUMBER | DOUBLE | RETURN_TO_STOCK
+  source              String            @default("MANUAL") // MANUAL | CSV | SHEETS | SHOPIFY | YOUCAN | DROPIFY | LIGHTFUNNELS | PHONE | ONLINE | DELIVERY_APP
+  groupId             String?
+  bundleGroupId       String? // For bundling same customer orders from different sellers on same day
+  scheduledCallAt     DateTime? // For smart recall - auto-reschedule after NO_ANSWER
+  podPhotoUrl         String?
+  podSignatureUrl     String?
+  carrierId           String?
+  carrierName         String?
+  awbTrackingCode     String?
+  awbLabelUrl         String?
+  dispatchedAt        DateTime?
+  productCost         Float             @default(0)
+  shippingCost        Float             @default(0)
+  callCenterFee       Float             @default(0)
+  platformFee         Float             @default(5000) // Seller flat fee per order
+  bundleDeliveryShare Float? // Share of combined delivery fee for bundled orders
+  adSpend             Float             @default(0)
+  confirmedAt         DateTime?
+  shippedAt           DateTime?
+  deliveredAt         DateTime?
+  returnedAt          DateTime?
+  cancelledAt         DateTime?
+  lastModifiedById    String?
+  lastModifiedBy      Admin?            @relation("AdminModifiedOrder", fields: [lastModifiedById], references: [id])
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  items               OrderItem[]
+  history             OrderHistory[]
+  callLogs            CallLog[]
+  callRecordings      CallRecording[]
+  notifications       NotificationLog[]
+  expense             Expense?
+  phoneCallLogs       PhoneCallLog[]    @relation("PhoneCallOrder")
+  delivery            Delivery?         @relation("OrderDelivery")
+  stockMovements      StockMovement[]   @relation("OrderStockMovements")
+
+  @@index([status(sort: Desc)])
+  @@index([phone])
+  @@index([scheduledCallAt])
+  @@index([createdAt(sort: Desc)])
+  @@index([sellerId])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([lastModifiedById])
+  @@index([assignedDriverId]) // CORE 03: Fast driver-scoped queries
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Float
+}
+
+model OrderHistory {
+  id             String   @id @default(cuid())
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  previousStatus String?
+  newStatus      String
+  changedById    String
+  note           String?
+  createdAt      DateTime @default(now())
+}
+
+model CallLog {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  agentId   String
+  agent     User     @relation(fields: [agentId], references: [id])
+  attempt   String
+  comment   String?
+  createdAt DateTime @default(now())
+}
+
+// Phone Call Center Log - separate from agent order call logs
+model PhoneCallLog {
+  id              String    @id @default(cuid())
+  customerPhone   String
+  customerId      String?
+  direction       String // "INCOMING" | "OUTGOING"
+  callType        String // "ORDER" | "INQUIRY" | "COMPLAINT" | "FOLLOWUP" | "OTHER"
+  orderId         String?
+  order           Order?    @relation("PhoneCallOrder", fields: [orderId], references: [id], onDelete: SetNull)
+  agentId         String
+  agent           User      @relation("PhoneCallAgent", fields: [agentId], references: [id])
+  notes           String?
+  durationMinutes Int?
+  callbackNeeded  Boolean   @default(false)
+  callbackAt      DateTime?
+  callbackDone    Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([customerPhone])
+  @@index([agentId])
+  @@index([callbackAt])
+  @@index([createdAt(sort: Desc)])
+}
+
+model Product {
+  id               String          @id @default(cuid())
+  sellerId         String
+  seller           User            @relation(fields: [sellerId], references: [id])
+  sku              String
+  name             String
+  shortDescription String? // max 150 chars
+  longDescription  String? // rich text
+  imageUrl         String? // Cloudinary image URL
+  supplierName     String?
+  supplierPhone    String?
+  cargoName        String?
+  cargoPhone       String?
+  quantityPricing  String? // JSON: [{min: 1, max: 5, price: 15000}, ...]
+  category         String? // for SKU generation
+  costPrice        Float
+  sellPrice        Float
+  isActive         Boolean         @default(true)
+  authorizeOpen    Boolean         @default(false)
+  currentStock     Int             @default(0) // CORE-04: Current stock level (denormalized for fast queries)
+  reorderPoint     Int             @default(10) // CORE-04: Alert when stock drops to this level
+  trackInventory   Boolean         @default(true) // CORE-04: Some items might not need stock tracking (e.g., services)
+  sourcingRequestId String?        @unique // Link to sourcing request that created this product
+  sourcingRequest   SourcingRequest? @relation(fields: [sourcingRequestId], references: [id])
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @default(now()) @updatedAt
+  orderItems       OrderItem[]
+  stocks           Stock[]
+  stockSnapshots   StockSnapshot[]
+
+  @@unique([sellerId, sku])
+}
+
+model Stock {
+  id          String          @id @default(cuid())
+  productId   String
+  product     Product         @relation(fields: [productId], references: [id])
+  sellerId    String
+  seller      User            @relation(fields: [sellerId], references: [id])
+  warehouseId String?
+  warehouse   Warehouse?      @relation(fields: [warehouseId], references: [id])
+  quantity    Int             @default(0)
+  alertLevel  Int             @default(5)
+  updatedAt   DateTime        @updatedAt
+  movements   StockMovement[]
+}
+
+model StockMovement {
+  id          String     @id @default(cuid())
+  stockId     String
+  stock       Stock      @relation(fields: [stockId], references: [id])
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
+  type        String // MANUAL_IN | MANUAL_OUT | AUTO_DEDUCT | AUTO_RETURN | TRANSFER_IN | TRANSFER_OUT
+  quantity    Int
+  reason      String?
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id])
+  adminId     String?
+  admin       Admin?     @relation("AdminStockMovement", fields: [adminId], references: [id])
+  orderId     String? // CORE-04: Link to order if stock change was triggered by an order
+  order       Order?     @relation("OrderStockMovements", fields: [orderId], references: [id])
+  balanceAfter Int?      // CORE-04: Stock level after this transaction (for audit trail)
+  costPerUnit Float?     // CORE-04: Cost per unit for IN transactions (purchases)
+  createdAt   DateTime   @default(now())
+}
+
+model Expense {
+  id            String       @id @default(cuid())
+  sellerId      String?
+  seller        User?        @relation("ExpenseSeller", fields: [sellerId], references: [id])
+  agentId       String?
+  agent         User?        @relation("AgentExpense", fields: [agentId], references: [id])
+  orderId       String?      @unique
+  order         Order?       @relation(fields: [orderId], references: [id])
+  category      String
+  expenseTypeId String?
+  expenseType   ExpenseType? @relation(fields: [expenseTypeId], references: [id])
+  amount        Float
+  description   String?
+  incurredAt    DateTime     @default(now())
+}
+
+model TenantSettings {
+  id            String   @id @default(cuid())
+  twilioSid     String?
+  twilioToken   String?
+  twilioPhone   String?
+  smsEnabled    Boolean  @default(false)
+  pusherAppId   String?
+  pusherKey     String?
+  pusherCluster String?
+  pusherChannel String?
+  users         User[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ExpenseType {
+  id          String    @id @default(cuid())
+  name        String
+  category    String // CALL_CENTER | SOURCING | AD_SPEND | OTHER
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  expenses    Expense[]
+}
+
+model Invoice {
+  id             String            @id @default(cuid())
+  sellerId       String
+  seller         User?             @relation("SellerInvoice", fields: [sellerId], references: [id])
+  deliveryManId  String?
+  deliveryMan    User?             @relation("DeliveryManInvoice", fields: [deliveryManId], references: [id])
+  ref            String            @unique
+  cashCollected  Float             @default(0)
+  refundedAmount Float             @default(0)
+  subtotal       Float
+  vat            Float             @default(0)
+  totalNet       Float
+  status         String            @default("UNPAID") // PAID | UNPAID
+  cycleType      String            @default("SELLER") // SELLER | DELIVERY
+  dateFrom       DateTime
+  dateTo         DateTime
+  isLocked       Boolean           @default(false)
+  lockedAt       DateTime?
+  lineItems      InvoiceLineItem[] @relation("InvoiceLineItems")
+  remittanceLock RemittanceLock?   @relation("RemittanceInvoice")
+  createdAt      DateTime          @default(now())
+}
+
+model RemittanceLock {
+  id            String    @id @default(cuid())
+  deliveryManId String
+  deliveryMan   User      @relation("RemittanceLockDriver", fields: [deliveryManId], references: [id])
+  periodStart   DateTime
+  periodEnd     DateTime
+  cashCollected Float     @default(0)
+  deliveryCount Int       @default(0)
+  totalFees     Float     @default(0)
+  netDue        Float     @default(0)
+  invoiceId     String?   @unique
+  invoice       Invoice?  @relation("RemittanceInvoice", fields: [invoiceId], references: [id])
+  status        String    @default("LOCKED") // LOCKED | UNLOCKED
+  lockedAt      DateTime  @default(now())
+  unlockedAt    DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation("InvoiceLineItems", fields: [invoiceId], references: [id])
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Float    @default(0)
+  amount      Float
+  category    String? // ORDER | FEE | ADJUSTMENT
+  orderId     String?
+  createdAt   DateTime @default(now())
+}
+
+model Integration {
+  id        String    @id @default(cuid())
+  sellerId  String
+  seller    User      @relation(fields: [sellerId], references: [id])
+  platform  String // SHOPIFY | YOUCAN | DROPIFY | LIGHTFUNNELS
+  secret    String
+  isActive  Boolean   @default(true)
+  lastHit   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  activities WebhookActivity[]
+
+  @@unique([sellerId, platform])
+}
+
+model WebhookActivity {
+  id             String       @id @default(cuid())
+  platform       String // SHOPIFY | YOUCAN | DROPIFY | LIGHTFUNNELS
+  status         String // SUCCESS | FAILED | DUPLICATE
+  eventType      String // orders/create | order.created | etc
+  orderId        String?
+  trackingNumber String?
+  reason         String?
+  payload        String? // JSON summary of payload
+  ipAddress      String?
+  headers        String? // JSON summary of headers
+  integrationId  String?
+  integration    Integration? @relation(fields: [integrationId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@index([platform, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
+model GoogleSheet {
+  id             String    @id @default(cuid())
+  sellerId       String
+  seller         User      @relation(fields: [sellerId], references: [id])
+  spreadsheetId  String
+  sheetName      String
+  lastSyncedAt   DateTime?
+  lastSyncStatus String? // 'SUCCESS' | 'ERROR' | 'IN_PROGRESS'
+  lastSyncError  String?
+  createdAt      DateTime  @default(now())
+}
+
+model DeliveryLocation {
+  id        String   @id @default(cuid())
+  driverId  String
+  driver    User     @relation(fields: [driverId], references: [id])
+  lat       Float
+  lng       Float
+  address   String?
+  accuracy  Float? // GPS accuracy in meters
+  createdAt DateTime @default(now())
+
+  @@index([driverId, createdAt(sort: Desc)])
+  @@index([createdAt])
+}
+
+model Warehouse {
+  id        String          @id @default(cuid())
+  name      String
+  city      String
+  address   String?
+  isActive  Boolean         @default(true)
+  stocks    Stock[]
+  movements StockMovement[]
+  createdAt DateTime        @default(now())
+}
+
+model StockSnapshot {
+  id             String   @id @default(cuid())
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id])
+  date           DateTime @default(now())
+  initialStock   Int
+  inForDelivery  Int      @default(0)
+  outForDelivery Int      @default(0)
+  finalStock     Int
+  snapshotDate   DateTime @default(now())
+
+  @@unique([productId, snapshotDate])
+  @@index([productId])
+  @@index([snapshotDate])
+}
+
+model DeliveryFeeConfig {
+  id              String   @id @default(cuid())
+  deliveryManId   String   @unique
+  deliveryMan     User     @relation(fields: [deliveryManId], references: [id])
+  costPerDelivery Float    @default(0)
+  bonusAmount     Float    @default(0)
+  penaltyAmount   Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+// ── v3 Models ────────────────────────────────────────────────
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  role      String
+  action    String
+  details   String
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
+
+model Wallet {
+  id            String              @id @default(cuid())
+  sellerId      String              @unique
+  seller        User                @relation(fields: [sellerId], references: [id])
+  balance       Float               @default(0)
+  totalEarned   Float               @default(0)
+  totalDeducted Float               @default(0)
+  updatedAt     DateTime            @updatedAt
+  transactions  WalletTransaction[]
+  withdrawals   WithdrawalRequest[]
+}
+
+model WalletTransaction {
+  id          String   @id @default(cuid())
+  walletId    String
+  wallet      Wallet   @relation(fields: [walletId], references: [id])
+  type        String // CREDIT | DEBIT | WITHDRAWAL | ADJUSTMENT
+  amount      Float
+  description String
+  orderId     String?
+  createdAt   DateTime @default(now())
+}
+
+model WithdrawalRequest {
+  id          String    @id @default(cuid())
+  walletId    String
+  wallet      Wallet    @relation(fields: [walletId], references: [id])
+  amount      Float
+  method      String    @default("MOBILE_MONEY") // MOBILE_MONEY | BANK_TRANSFER
+  account     String?
+  status      String    @default("PENDING") // PENDING | APPROVED | REJECTED | PAID
+  requestedAt DateTime  @default(now())
+  processedAt DateTime?
+  processedBy String?
+  note        String?
+}
+
+model CatalogProduct {
+  id               String            @id @default(cuid())
+  name             String
+  description      String?
+  imageUrl         String?
+  costPrice        Float
+  category         String?
+  countryAvailable String?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  favorites        CatalogFavorite[]
+}
+
+model CatalogFavorite {
+  id               String         @id @default(cuid())
+  sellerId         String
+  seller           User           @relation(fields: [sellerId], references: [id])
+  catalogProductId String
+  product          CatalogProduct @relation(fields: [catalogProductId], references: [id])
+  createdAt        DateTime       @default(now())
+
+  @@unique([sellerId, catalogProductId])
+}
+
+model SourcingRequest {
+  id              String         @id @default(cuid())
+  sellerId        String
+  seller          User           @relation(fields: [sellerId], references: [id])
+  productName     String
+  description     String?
+  referenceUrl    String?
+  images          String?        @default("[]") // Cloudinary URLs as JSON array string
+  quantity        Int            @default(1)
+  country         String         @default("")
+  shippingMethod  String         @default("")
+  trackingDetails String?
+  type            String         @default("INBOUND") // INBOUND | OUTBOUND
+  status          String         @default("SUBMITTED")
+  adminNote       String?
+  receivedQty     Int?
+  receivedImages  String?        @default("[]") // Cloudinary URLs as JSON array string
+  damagedQty      Int?           @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @default(now()) @updatedAt
+  reviewedAt      DateTime?
+  reviewedBy      String?
+  inTransitAt     DateTime?
+  receivedAt      DateTime?
+  stockedAt       DateTime?
+  products        Product[]
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  sellerId   String    @unique
+  seller     User      @relation(fields: [sellerId], references: [id])
+  key        String    @unique
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// ── Phase 2 Models ────────────────────────────────────────────────
+
+model CallRecording {
+  id              String          @id @default(cuid())
+  orderId         String
+  order           Order           @relation(fields: [orderId], references: [id])
+  agentId         String
+  agent           User            @relation(fields: [agentId], references: [id])
+  twilioCallSid   String          @unique
+  recordingUrl    String
+  recordingSid    String
+  durationSeconds Int             @default(0)
+  status          String           @default("PENDING")
+  createdAt       DateTime        @default(now())
+}
+
+model TwilioSettings {
+  id          String   @id @default(cuid())
+  accountSid  String
+  authToken   String
+  apiKey      String
+  apiSecret   String
+  twimlAppSid String
+  phoneNumber String
+  updatedAt   DateTime @updatedAt
+}
+
+model CarrierSettings {
+  id         String   @id @default(cuid())
+  name       String // "shipsen" | "colisswift" | "afriquecod"
+  apiKey     String
+  apiSecret  String?
+  isActive   Boolean  @default(true)
+  webhookUrl String?
+  updatedAt  DateTime @updatedAt
+}
+
+model NotificationLog {
+  id      String       @id @default(cuid())
+  orderId String
+  order   Order        @relation(fields: [orderId], references: [id])
+  type    String
+  channel String
+  phone   String
+  message String
+  status  String // sent | failed
+  sentAt  DateTime     @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model NotificationSettings {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  smsEnabled          Boolean  @default(true)
+  whatsappEnabled     Boolean  @default(false)
+  notifyOnConfirmed   Boolean  @default(true)
+  notifyOnShipped     Boolean  @default(true)
+  notifyOnDelivered   Boolean  @default(true)
+  notifyOnReturned    Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// ── CORE 01: Admin System Models ────────────────────────────────────────
+
+model Admin {
+  id                  String      @id @default(cuid())
+  email               String      @unique
+  password            String // hashed, never plaintext
+  name                String
+  role                String      @default("MANAGER")
+  status              String      @default("ACTIVE")
+  lastLoginAt         DateTime?
+  forcePasswordChange Boolean     @default(false)
+  createdBy           String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  // Relations
+  auditLogs         AuditLog[]
+  modifiedOrders    Order[]         @relation("AdminModifiedOrder")
+  stockMovements    StockMovement[] @relation("AdminStockMovement")
+  impersonationLogs AuditLog[]      @relation("AdminImpersonator")
+  beingImpersonated AuditLog[]      @relation("AdminImpersonated")
+
+  @@index([email])
+  @@index([status])
+}
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  adminId         String // who performed the action
+  admin           Admin    @relation(fields: [adminId], references: [id])
+  userName        String // denormalized for fast display
+  userRole        String // role at time of action
+  action          String // e.g., "USER_CREATED", "ORDER_STATUS_CHANGED", "SETTINGS_UPDATED"
+  targetType      String // e.g., "User", "Order", "Settings"
+  targetId        String // ID of the affected record
+  details         String // JSON string: { before: {...}, after: {...} } — what changed
+  ipAddress       String?
+  impersonatingId String? // if action was performed while impersonating, store target user ID
+  impersonatingAs Admin?   @relation("AdminImpersonated", fields: [impersonatingId], references: [id])
+  impersonatorId  String?
+  impersonator    Admin?   @relation("AdminImpersonator", fields: [impersonatorId], references: [id])
+  createdAt       DateTime @default(now())
+
+  @@index([adminId])
+  @@index([action])
+  @@index([createdAt(sort: Desc)])
+}
+
+// ── CORE 03: Delivery Portal Models ─────────────────────────────────────
+
+model Driver {
+  id              String    @id @default(cuid())
+  name            String
+  phone           String    @unique
+  pin             String // hashed 4-6 digit PIN (bcrypt)
+  status          String    @default("OFFLINE") // "AVAILABLE" | "ON_DELIVERY" | "OFFLINE"
+  vehicleType     String? // "MOTORCYCLE" | "CAR" | "BICYCLE" | "ON_FOOT"
+  licensePlate    String?
+  zone            String? // assigned delivery zone name
+  isActive        Boolean   @default(true)
+  lastLocationLat Float?
+  lastLocationLng Float?
+  lastSeenAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  deliveries     Delivery[]
+  cashHandoffs   CashHandoff[]
+  assignedOrders Order[]       @relation("DriverOrderAssignment")
+
+  @@index([status])
+  @@index([isActive])
+  @@index([phone])
+}
+
+model Delivery {
+  id             String    @id @default(cuid())
+  orderId        String    @unique
+  order          Order     @relation("OrderDelivery", fields: [orderId], references: [id])
+  driverId       String
+  driver         Driver    @relation(fields: [driverId], references: [id])
+  status         String    @default("ASSIGNED") // "ASSIGNED" | "PICKED_UP" | "IN_TRANSIT" | "DELIVERED" | "RETURNED"
+  assignedAt     DateTime  @default(now())
+  pickedUpAt     DateTime?
+  inTransitAt    DateTime?
+  deliveredAt    DateTime?
+  returnedAt     DateTime?
+  returnReason   String? // "CUSTOMER_REFUSED" | "NOT_HOME" | "WRONG_ADDRESS" | "DAMAGED" | "OTHER"
+  returnNotes    String?
+  codCollected   Float?
+  gpsPickupLat   Float?
+  gpsPickupLng   Float?
+  gpsDeliveryLat Float?
+  gpsDeliveryLng Float?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([driverId])
+  @@index([driverId, status])
+  @@index([status])
+  @@index([orderId])
+}
+
+model CashHandoff {
+  id             String    @id @default(cuid())
+  driverId       String
+  driver         Driver    @relation(fields: [driverId], references: [id])
+  shiftDate      DateTime  @default(now())
+  totalCollected Float
+  deliveryCount  Int
+  status         String    @default("PENDING") // "PENDING" | "RECEIVED" | "DISCREPANCY"
+  adminNotes     String?
+  receivedBy     String? // admin ID who confirmed receipt
+  receivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([driverId])
+  @@index([status])
+  @@index([shiftDate(sort: Desc)])
+}
